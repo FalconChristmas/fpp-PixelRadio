@@ -1,0 +1,134 @@
+{
+    "settingGroups": {
+        "PixelRadioDevice": {
+            "description": "Pixel Radio Device",
+            "settings": [
+                "IPAddress",
+                "Port",
+                "Frequency",
+                "IdleAction"
+            ]   
+        },
+        "PixelRadioRDSSettings": {
+            "description": "RDS Settings",
+            "settings": [
+                "ProgramType",
+                "StationID",
+                "RDS"
+            ]   
+        }
+    },
+    "settings": {
+        "IPAddress": {
+            "name": "IPAddress",
+            "description": "IP Address",
+            "tip": "IP Address of Pixel Radio Device",
+            "restart": 1,
+            "reboot": 0,
+            "type": "text",
+            "default": "",
+            "size": 16,
+            "maxlength": 16
+        },
+        "Port": {
+            "name": "Port",
+            "description": "Port",
+            "tip": "IP Port of Pixel Radio Device",
+            "restart": 1,
+            "reboot": 0,
+            "type": "number",
+            "default": "80",
+            "size": 6,
+            "min":1,
+            "max": 65536
+        },
+        "IdleAction": {
+            "name": "IdleAction",
+            "description": "Playlist Idle Behavior",
+            "tip": "What to do if a playlist is not playing.",
+            "restart": 1,
+            "reboot": 0,
+            "type": "select",
+            "default": 0,
+            "options": {
+                "Leave Alone": 0,
+                "Mute": 1,
+                "Stop Transmitter": 2
+            }
+        },
+        "Frequency": {
+            "name": "Frequency",
+            "description": "FM Frequency",
+            "tip": "FM Frequency to broadcast on.",
+            "restart": 1,
+            "reboot": 0,
+            "type": "text",
+            "default": "87.9",
+            "size": 6,
+            "maxlength": 6
+        },
+        "StationID": {
+            "name": "StationID",
+            "description": "Station ID",
+            "tip": "Station Identifier",
+            "restart": 1,
+            "reboot": 0,
+            "type": "text",
+            "default": "Merry   Christ- mas",
+            "size": 30,
+            "maxlength": 100
+        },
+        "RDS": {
+            "name": "RDS",
+            "description": "RDS String",
+            "tip": "RDS String.",
+            "restart": 1,
+            "reboot": 0,
+            "type": "text",
+            "default": "[{ARTIST} - {TITLE}]",
+            "size": 30,
+            "maxlength": 100
+        },
+        "ProgramType": {
+            "name": "ProgramType",
+            "description": "Program Type (PTY North America / Europe)",
+            "tip": "Program Type.",
+            "restart": 1,
+            "reboot": 0,
+            "type": "select",
+            "default": 0,
+            "options": {
+                "0 - None / None": 0, 
+                "1 - News / News": 1, 
+                "2 - Information / Current Affairs": 2, 
+                "3 - Sport / Information": 3, 
+                "4 - Talk / Sport": 4, 
+                "5 - Rock / Education": 5, 
+                "6 - Classic Rock / Drama": 6, 
+                "7 - Adult Hits / Culture": 7, 
+                "8 - Soft Rock / Science": 8, 
+                "9 - Top 40 / Varied": 9, 
+                "10 - Country / Pop": 10, 
+                "11 - Oldies / Rock": 11, 
+                "12 - Soft Music / Easy Listening": 12, 
+                "13 - Nostalgia / Light Classical": 13, 
+                "14 - Jazz / Serious Classical": 14, 
+                "15 - Classical / Other Music": 15, 
+                "16 - R&B / Weather": 16, 
+                "17 - Soft R&B / Finance": 17, 
+                "18 - Language / Childrens": 18, 
+                "19 - Religious Music / Social Affairs": 19, 
+                "20 - Religious Talk / Religion": 20, 
+                "21 - Personality / Phone-In": 21, 
+                "22 - Public / Travel": 22, 
+                "23 - College / Leisure": 23, 
+                "24 - --- / Jazz": 24, 
+                "25 - --- / Country": 25, 
+                "26 - --- / National Music": 26, 
+                "27 - --- / Oldies": 27, 
+                "28 - --- / Folk": 28, 
+                "29 - Weather / Documentary": 29
+            }
+        }
+    }
+}
