@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <queue>
 
 #include <unistd.h>
 #include <termios.h>
@@ -16,39 +17,103 @@ class FPPPixelRadioPlugin : public FPPPlugin {
 public:
     std::string baseURL;
 
+    
+    std::string stationName = "";
+    std::string rdsText = "";
+
+    volatile bool running = true;
+    std::mutex lock;
+    std::condition_variable condition;
+    std::thread *sendThread = nullptr;
+    std::queue<std::string> urls;
+    
+
     FPPPixelRadioPlugin() : FPPPlugin("fpp-PixelRadio") {
         setDefaultSettings();
+
         baseURL = "http://" + settings["IPAddress"] + ":" + settings["Port"] + "/cmd?";
 
         std::string freq = settings["Frequency"];
         replaceAll(freq, ".", "");
 
-        std::string resp;
-        urlGet(baseURL + "freq=" + freq, resp);
-        urlGet(baseURL + "pic=" + settings["ProgramType"], resp);
+        sendThread = new std::thread([this] () {this->run();});
+
+        std::unique_lock<std::mutex> lk(lock);
+        urls.emplace("freq=" + freq);
+        
+        std::string sc = settings["ProgramCode"];
+        while (sc.length() < 4) {
+            sc += "A";
+        }
+        int v2 = sc[1] - 65;
+        int v3 = sc[2] - 65;
+        int v4 = sc[3] - 65;
+        if (v2 < 0 || v2 > 26) v2 = 0;
+        if (v3 < 0 || v3 > 26) v3 = 0;
+        if (v4 < 0 || v4 > 26) v4 = 0;
+        int v1 = (sc[0] == 'K') ? 21672 : 4096;
+        v1 += v4;
+        v1 += v3 * 26;
+        v1 += v2 * 26 * 26;
+        char buf[32];
+        sprintf(buf, "pic=0x%X", v1);
+        urls.emplace(buf);
+        urls.emplace("start=rds");
+
+        lk.unlock();
+        condition.notify_all();
+
+        //urlGet(baseURL + "ptype=" + settings["ProgramType"], resp);
 
         formatAndSendText(settings["StationID"], "", "", "", 0, true);
         formatAndSendText(settings["RDS"], "", "", "", 0, false);
     }
     virtual ~FPPPixelRadioPlugin() {
-    }
-    
-    void startAction() {
-        std::string resp;
-        if (settings["IdleAction"] == "1") {
-            urlGet(baseURL + "mute=off", resp);
-        } else if (settings["IdleAction"] == "2") {
-            urlGet(baseURL + "start=1", resp);
+        urls.emplace("stop=rds");
+        condition.notify_all();
+        std::unique_lock<std::mutex> lk(lock);
+        while (!urls.empty()) {
+            lk.unlock();
+            condition.notify_all();
+            lk.lock();
         }
+        running = false;
+        lk.unlock();
+        if (sendThread->joinable()) {
+            sendThread->join();
+        }
+        delete sendThread;
+    }
+    void run() {
+        std::unique_lock<std::mutex> lk(lock);
+        while (running) {
+            while (!urls.empty()) {
+                std::string resp;
+                std::string u = urls.front();
+                urls.pop();
+                lk.unlock();
+                urlGet(baseURL + u, resp);
+                lk.lock();
+            }
+            if (urls.empty()) {
+                condition.wait(lk);
+            }
+        }
+    }
+    void startAction() {
+        if (settings["IdleAction"] == "1") {
+            std::unique_lock<std::mutex> lk(lock);
+            urls.emplace("mute=off");
+        }
+        condition.notify_all();
     }
    
     void stopAction() {
-        std::string resp;
         if (settings["IdleAction"] == "1") {
-            urlGet(baseURL + "mute=on", resp);
-        } else if (settings["IdleAction"] == "2") {
-            urlGet(baseURL + "stop=1", resp);
+            std::unique_lock<std::mutex> lk(lock);
+            urls.emplace("mute=on");
         }
+        condition.notify_all();
     }
     
     static void padTo(std::string &s, int l) {
@@ -118,16 +183,31 @@ public:
                 fragments.push_back(m);
             }
             //FIXME - PixelRadio only supports a single fragment?
-            std::string resp;
-            urlGet(baseURL + "psn=" + fragments[0], resp);
+            if (fragments[0] != stationName) {
+                stationName = fragments[0];
+                std::unique_lock<std::mutex> lk(lock);
+                urls.emplace("psn=" + fragments[0]);
+                lk.unlock();
+                condition.notify_all();
+            }
         } else {
             LogDebug(VB_PLUGIN, "Setting RDS text to \"%s\"\n", output.c_str());
-            std::string resp;
-            urlGet(baseURL + "rtm=" + output, resp);
+            if (output != rdsText) {
+                rdsText = output;
+                std::unique_lock<std::mutex> lk(lock);
+                if (output == "") {
+                    urls.emplace("rtm=%20");
+                    urls.emplace("rtper=1");
+                } else {
+                    urls.emplace("rtm=" + output);
+                    urls.emplace("rtper=900");
+                }
+                lk.unlock();
+                condition.notify_all();
+            }
         }
     }
     
-
     virtual void playlistCallback(const Json::Value &playlist, const std::string &action, const std::string &section, int item) {
         if (action == "stop") {
             formatAndSendText(settings["StationID"], "", "", "", 0, true);
@@ -168,7 +248,7 @@ public:
         setIfNotFound("StationID", "Merry   Christ- mas", true);
         setIfNotFound("RDS", "[{Artist} - {Title}]", true);
         setIfNotFound("ProgramType", "0");
-
+        setIfNotFound("StationCode", "WFPP");
     }
     void setIfNotFound(const std::string &s, const std::string &v, bool emptyAllowed = false) {
         if (settings.find(s) == settings.end()) {

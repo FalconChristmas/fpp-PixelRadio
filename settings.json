@@ -13,6 +13,7 @@
             "description": "RDS Settings",
             "settings": [
                 "ProgramType",
+                "StationCode",
                 "StationID",
                 "RDS"
             ]   
@@ -52,8 +53,7 @@
             "default": 0,
             "options": {
                 "Leave Alone": 0,
-                "Mute": 1,
-                "Stop Transmitter": 2
+                "Mute": 1
             }
         },
         "Frequency": {
@@ -85,9 +85,20 @@
             "restart": 1,
             "reboot": 0,
             "type": "text",
-            "default": "[{ARTIST} - {TITLE}]",
+            "default": "[{Artist} - {Title}]",
             "size": 30,
             "maxlength": 100
+        },
+        "StationCode": {
+            "name": "StationCode",
+            "description": "Station Code",
+            "tip": "Station Code, 4 character string, all upper case. First letter must be W or K.",
+            "restart": 1,
+            "reboot": 0,
+            "type": "text",
+            "default": "WFPP",
+            "size": 6,
+            "maxlength": 4
         },
         "ProgramType": {
             "name": "ProgramType",
