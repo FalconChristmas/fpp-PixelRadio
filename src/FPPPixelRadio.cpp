@@ -59,11 +59,10 @@ public:
         sprintf(buf, "pic=0x%X", v1);
         urls.emplace(buf);
         urls.emplace("start=rds");
+        urls.emplace("pty=" + settings["ProgramType"]);
 
         lk.unlock();
         condition.notify_all();
-
-        //urlGet(baseURL + "ptype=" + settings["ProgramType"], resp);
 
         formatAndSendText(settings["StationID"], "", "", "", 0, true);
         formatAndSendText(settings["RDS"], "", "", "", 0, false);
@@ -79,7 +78,9 @@ public:
         }
         running = false;
         lk.unlock();
+        condition.notify_all();
         if (sendThread->joinable()) {
+            condition.notify_all();
             sendThread->join();
         }
         delete sendThread;
@@ -95,7 +96,7 @@ public:
                 urlGet(baseURL + u, resp);
                 lk.lock();
             }
-            if (urls.empty()) {
+            if (running && urls.empty()) {
                 condition.wait(lk);
             }
         }
