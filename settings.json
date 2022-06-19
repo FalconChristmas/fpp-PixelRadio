@@ -15,7 +15,11 @@
                 "ProgramType",
                 "StationCode",
                 "StationID",
-                "RDS"
+                "StationIDTime",
+                "RDS",
+                "RDS2",
+                "RDS3",
+                "RDSCycleTime"
             ]   
         }
     },
@@ -78,6 +82,17 @@
             "size": 30,
             "maxlength": 100
         },
+        "StationIDTime": {
+            "name": "StationIDTime",
+            "description": "Station ID Display Time",
+            "tip": "Time (s) that each 8 character section of the station ID is displayed.",
+            "restart": 1,
+            "reboot": 0,
+            "type": "number",
+            "default": 5,
+            "min": 1,
+            "max": 60
+        },
         "RDS": {
             "name": "RDS",
             "description": "RDS String",
@@ -88,6 +103,39 @@
             "default": "[{Artist} - {Title}]",
             "size": 30,
             "maxlength": 100
+        },
+        "RDS2": {
+            "name": "RDS2",
+            "description": "RDS String #2",
+            "tip": "RDS String #2.",
+            "restart": 1,
+            "reboot": 0,
+            "type": "text",
+            "default": "",
+            "size": 30,
+            "maxlength": 100
+        },
+        "RDS3": {
+            "name": "RDS3",
+            "description": "RDS String #3",
+            "tip": "RDS String #3.",
+            "restart": 1,
+            "reboot": 0,
+            "type": "text",
+            "default": "",
+            "size": 30,
+            "maxlength": 100
+        },
+        "RDSCycleTime": {
+            "name": "RDSCycleTime",
+            "description": "RDS Cycle Time",
+            "tip": "Time (s) that each RDS string is displayed.",
+            "restart": 1,
+            "reboot": 0,
+            "type": "number",
+            "default": 15,
+            "min": 1,
+            "max": 300
         },
         "StationCode": {
             "name": "StationCode",

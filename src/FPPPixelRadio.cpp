@@ -20,28 +20,42 @@ public:
     
     std::string stationName = "";
     std::string rdsText = "";
+    std::string rdsText2 = "";
+    std::string rdsText3 = "";
 
     volatile bool running = true;
     std::mutex lock;
     std::condition_variable condition;
     std::thread *sendThread = nullptr;
     std::queue<std::string> urls;
+
+    uint32_t stationIdCycleTime = 5;
+    uint32_t rdsCycleTime = 15;
+
+    std::vector<std::string> stationIdStrings;
+    int curStationIdString = 0;
+    uint64_t nextStationTime = 0;
+
+    std::array<std::string, 3> rdsStrings;
+    int curRDSString = 0;
+    uint64_t nextRDSTime = 0;
     
 
     FPPPixelRadioPlugin() : FPPPlugin("fpp-PixelRadio") {
         setDefaultSettings();
+
+        stationIdCycleTime = std::stoi(settings["StationIDTime"]);
+        rdsCycleTime = std::stoi(settings["RDSCycleTime"]);
 
         baseURL = "http://" + settings["IPAddress"] + ":" + settings["Port"] + "/cmd?";
 
         std::string freq = settings["Frequency"];
         replaceAll(freq, ".", "");
 
-        sendThread = new std::thread([this] () {this->run();});
-
         std::unique_lock<std::mutex> lk(lock);
         urls.emplace("freq=" + freq);
         
-        std::string sc = settings["ProgramCode"];
+        std::string sc = settings["StationCode"];
         while (sc.length() < 4) {
             sc += "A";
         }
@@ -51,7 +65,7 @@ public:
         if (v2 < 0 || v2 > 26) v2 = 0;
         if (v3 < 0 || v3 > 26) v3 = 0;
         if (v4 < 0 || v4 > 26) v4 = 0;
-        int v1 = (sc[0] == 'K') ? 21672 : 4096;
+        int v1 = (sc[0] == 'W') ? 21672 : 4096;
         v1 += v4;
         v1 += v3 * 26;
         v1 += v2 * 26 * 26;
@@ -62,11 +76,15 @@ public:
         urls.emplace("pty=" + settings["ProgramType"]);
 
         lk.unlock();
-        condition.notify_all();
 
-        formatAndSendText(settings["StationID"], "", "", "", 0, true);
-        formatAndSendText(settings["RDS"], "", "", "", 0, false);
+        formatAndSendText(settings["StationID"], "", "", "", 0, 0);
+        formatAndSendText(settings["RDS"], "", "", "", 0, 1);
+        formatAndSendText(settings["RDS2"], "", "", "", 0, 2);
+        formatAndSendText(settings["RDS3"], "", "", "", 0, 3);
+        sendThread = new std::thread([this] () {this->run();});
+        condition.notify_all();
     }
+
     virtual ~FPPPixelRadioPlugin() {
         urls.emplace("stop=rds");
         condition.notify_all();
@@ -88,16 +106,42 @@ public:
     void run() {
         std::unique_lock<std::mutex> lk(lock);
         while (running) {
+            uint64_t ct = GetTimeMS();
+            if (ct > nextStationTime && curStationIdString < stationIdStrings.size()) {
+                urls.emplace("psn=" + stationIdStrings[curStationIdString]);
+                curStationIdString++;
+                if (curStationIdString >= stationIdStrings.size()) {
+                    curStationIdString = 0;
+                }
+                nextStationTime = ct + stationIdCycleTime * 1000;
+            }
+            if (ct > nextRDSTime) {
+                std::string s = rdsStrings[curRDSString];
+                if (s == "") {
+                    s = "    ";
+                }
+                urls.emplace("rtm=" + s);
+                curRDSString++;
+                if (curRDSString == 3 || rdsStrings[curRDSString] == "") {
+                    curRDSString = 0;
+                }
+                s = "rtper=";
+                s += std::to_string(rdsCycleTime);
+                urls.emplace(s);
+                nextRDSTime = ct + rdsCycleTime * 1000;
+            }
+
             while (!urls.empty()) {
                 std::string resp;
                 std::string u = urls.front();
                 urls.pop();
                 lk.unlock();
                 urlGet(baseURL + u, resp);
+                LogDebug(VB_PLUGIN, "%s%s:   %s", baseURL.c_str(), u.c_str(), resp.c_str());
                 lk.lock();
             }
             if (running && urls.empty()) {
-                condition.wait(lk);
+                condition.wait_for(lk, std::chrono::seconds(1));
             }
         }
     }
@@ -124,7 +168,7 @@ public:
         }
     }
 
-    void formatAndSendText(const std::string &text, const std::string &artist, const std::string &title, const std::string &album, int length, bool station) {
+    void formatAndSendText(const std::string &text, const std::string &artist, const std::string &title, const std::string &album, int length, int location) {
         std::string output;
         
         int artistIdx = -1;
@@ -164,7 +208,7 @@ public:
                 output += text[x];
             }
         }
-        if (station) {
+        if (location == 0) {
             LogDebug(VB_PLUGIN, "Setting RDS Station text to \"%s\"\n", output.c_str());
             std::vector<std::string> fragments;
             while (output.size()) {
@@ -183,36 +227,29 @@ public:
                 std::string m = "        ";
                 fragments.push_back(m);
             }
-            //FIXME - PixelRadio only supports a single fragment?
-            if (fragments[0] != stationName) {
-                stationName = fragments[0];
-                std::unique_lock<std::mutex> lk(lock);
-                urls.emplace("psn=" + fragments[0]);
-                lk.unlock();
-                condition.notify_all();
-            }
+            std::unique_lock<std::mutex> lk(lock);
+            stationIdStrings = fragments;
+            curStationIdString = 0;
+            lk.unlock();
+            condition.notify_all();
         } else {
-            LogDebug(VB_PLUGIN, "Setting RDS text to \"%s\"\n", output.c_str());
-            if (output != rdsText) {
-                rdsText = output;
-                std::unique_lock<std::mutex> lk(lock);
-                if (output == "") {
-                    urls.emplace("rtm=%20");
-                    urls.emplace("rtper=1");
-                } else {
-                    urls.emplace("rtm=" + output);
-                    urls.emplace("rtper=900");
-                }
-                lk.unlock();
-                condition.notify_all();
-            }
+            LogDebug(VB_PLUGIN, "Setting RDS %d text to \"%s\"\n", location, output.c_str());
+            std::unique_lock<std::mutex> lk(lock);
+            rdsStrings[location - 1] = output;
+            curRDSString = 0;
+            lk.unlock();
+            condition.notify_all();
         }
     }
     
     virtual void playlistCallback(const Json::Value &playlist, const std::string &action, const std::string &section, int item) {
         if (action == "stop") {
-            formatAndSendText(settings["StationID"], "", "", "", 0, true);
-            formatAndSendText(settings["RDS"], "", "", "", 0, false);
+            formatAndSendText(settings["StationID"], "", "", "", 0, 0);
+            formatAndSendText(settings["RDS"], "", "", "", 0, 1);
+            formatAndSendText(settings["RDS2"], "", "", "", 0, 2);
+            formatAndSendText(settings["RDS3"], "", "", "", 0, 3);
+            nextRDSTime = 0;
+            nextStationTime = 0;
         }
         if (action == "start") {
             startAction();
@@ -235,8 +272,12 @@ public:
             album = "";
         }
         
-        formatAndSendText(settings["StationID"], artist, title, album, length, true);
-        formatAndSendText(settings["RDS"], artist, title, album, length, false);
+        formatAndSendText(settings["StationID"], artist, title, album, length, 0);
+        formatAndSendText(settings["RDS"], artist, title, album, length, 1);
+        formatAndSendText(settings["RDS2"], artist, title, album, length, 2);
+        formatAndSendText(settings["RDS3"], artist, title, album, length, 3);
+        nextRDSTime = 0;
+        nextStationTime = 0;
     }
     
     
@@ -246,8 +287,12 @@ public:
         setIfNotFound("IPAddress", "");
         setIfNotFound("Port", "80");
 
-        setIfNotFound("StationID", "Merry   Christ- mas", true);
+        setIfNotFound("StationID", "Merry   Christ- mas", true);        
         setIfNotFound("RDS", "[{Artist} - {Title}]", true);
+        setIfNotFound("RDS2", "", true);
+        setIfNotFound("RDS3", "", true);
+        setIfNotFound("RDSCycleTime", "15");
+        setIfNotFound("StationIDTime", "5");
         setIfNotFound("ProgramType", "0");
         setIfNotFound("StationCode", "WFPP");
     }
