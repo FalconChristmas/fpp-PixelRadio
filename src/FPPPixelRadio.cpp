@@ -118,7 +118,7 @@ public:
             if (ct > nextRDSTime) {
                 std::string s = rdsStrings[curRDSString];
                 if (s == "") {
-                    s = "    ";
+                    s = "%7f";
                 }
                 urls.emplace("rtm=" + s);
                 curRDSString++;
