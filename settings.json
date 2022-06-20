@@ -57,7 +57,8 @@
             "default": 0,
             "options": {
                 "Leave Alone": 0,
-                "Mute": 1
+                "Mute": 1,
+                "Disable Carrier": 2
             }
         },
         "Frequency": {

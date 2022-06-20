@@ -12,6 +12,21 @@
 #include "settings.h"
 #include "Plugin.h"
 #include "log.h"
+#include "commands/Commands.h"
+
+
+class FPPPixelRadioPlugin;
+
+
+class PixelRadioCarrierCommand : public Command {
+public:
+    PixelRadioCarrierCommand(FPPPixelRadioPlugin *p);
+    virtual ~PixelRadioCarrierCommand() {}
+
+    virtual std::unique_ptr<Result> run(const std::vector<std::string>& args) override;
+    FPPPixelRadioPlugin *plugin;
+};
+
 
 class FPPPixelRadioPlugin : public FPPPlugin {
 public:
@@ -39,7 +54,6 @@ public:
     std::array<std::string, 3> rdsStrings;
     int curRDSString = 0;
     uint64_t nextRDSTime = 0;
-    
 
     FPPPixelRadioPlugin() : FPPPlugin("fpp-PixelRadio") {
         setDefaultSettings();
@@ -76,6 +90,7 @@ public:
         urls.emplace("pty=" + settings["ProgramType"]);
 
         lk.unlock();
+        stopAction();
 
         formatAndSendText(settings["StationID"], "", "", "", 0, 0);
         formatAndSendText(settings["RDS"], "", "", "", 0, 1);
@@ -83,6 +98,8 @@ public:
         formatAndSendText(settings["RDS3"], "", "", "", 0, 3);
         sendThread = new std::thread([this] () {this->run();});
         condition.notify_all();
+
+        CommandManager::INSTANCE.addCommand(new PixelRadioCarrierCommand(this));
     }
 
     virtual ~FPPPixelRadioPlugin() {
@@ -149,6 +166,9 @@ public:
         if (settings["IdleAction"] == "1") {
             std::unique_lock<std::mutex> lk(lock);
             urls.emplace("mute=off");
+        } else if (settings["IdleAction"] == "2") {
+            std::unique_lock<std::mutex> lk(lock);
+            urls.emplace("rfc=on");
         }
         condition.notify_all();
     }
@@ -157,7 +177,15 @@ public:
         if (settings["IdleAction"] == "1") {
             std::unique_lock<std::mutex> lk(lock);
             urls.emplace("mute=on");
+        } else if (settings["IdleAction"] == "2") {
+            std::unique_lock<std::mutex> lk(lock);
+            urls.emplace("rfc=off");
         }
+        condition.notify_all();
+    }
+    void AddURL(const std::string &s) {
+        std::unique_lock<std::mutex> lk(lock);
+        urls.emplace(s);
         condition.notify_all();
     }
     
@@ -306,6 +334,26 @@ public:
     }
 };
 
+
+
+PixelRadioCarrierCommand::PixelRadioCarrierCommand(FPPPixelRadioPlugin *p) 
+    : Command("PixelRadio Carrier", "PixelRadio - Enable/Disable Carrier"), plugin(p)
+{
+        args.push_back(CommandArg("On/Off", "bool", "Enable/Disable Carrier"));
+}
+
+std::unique_ptr<Command::Result> PixelRadioCarrierCommand::run(const std::vector<std::string>& args) {
+    std::string s = "1";
+    if (args.size() >= 1) {
+        s = args[0];
+    }
+    if (s == "true" || s == "1") {
+        plugin->AddURL("rfc=on");
+    } else {
+        plugin->AddURL("rfc=off");
+    }
+    return std::make_unique<Command::Result>("OK");
+}
 
 extern "C" {
     FPPPlugin *createPlugin() {
