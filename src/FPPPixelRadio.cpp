@@ -285,7 +285,7 @@ public:
         setIfNotFound("Frequency", "87.9");
         setIfNotFound("IdleAction", "0");
         setIfNotFound("IPAddress", "");
-        setIfNotFound("Port", "80");
+        setIfNotFound("Port", "8080");
 
         setIfNotFound("StationID", "Merry   Christ- mas", true);        
         setIfNotFound("RDS", "[{Artist} - {Title}]", true);
