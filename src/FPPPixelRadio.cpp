@@ -288,7 +288,7 @@ public:
             lastPlayedPlaylist.compare(settings["PauseablePlaylist"]) != 0);
 
         if (action == "start") {
-            currentPlaylist = incomingPlaylist;  
+            currentPlaylist = playlist["name"].asString();  
             startAction();
         } else if (action == "stop") {
             lastPlayedPlaylist = currentPlaylist;
