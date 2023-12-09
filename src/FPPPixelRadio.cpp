@@ -30,6 +30,9 @@ public:
 
 class FPPPixelRadioPlugin : public FPPPlugin {
 public:
+    std::string lastPlayedPlaylist = "";
+    std::string currentPlaylist = "";
+    
     std::string baseURL;
 
     
@@ -279,12 +282,20 @@ public:
             nextRDSTime = 0;
             nextStationTime = 0;
         }
+
+        bool doStopActions = currentPlaylist.compare(settings["PauseablePlaylist"]) == 0 ||
+            ( lastPlayedPlaylist.compare("") == 0 || 
+            lastPlayedPlaylist.compare(settings["PauseablePlaylist"]) != 0);
+
         if (action == "start") {
+            currentPlaylist = incomingPlaylist;  
             startAction();
         } else if (action == "stop") {
-            stopAction();
+            lastPlayedPlaylist = currentPlaylist;
+            if( doStopActions ) {
+                stopAction();
+            }
         }
-        
     }
     virtual void mediaCallback(const Json::Value &playlist, const MediaDetails &mediaDetails) {
         std::string title = mediaDetails.title;
@@ -314,6 +325,7 @@ public:
         setIfNotFound("IdleAction", "0");
         setIfNotFound("IPAddress", "");
         setIfNotFound("Port", "8080");
+        setIfNotFound("PauseablePlaylist", "", true);
 
         setIfNotFound("StationID", "Merry   Christ- mas", true);        
         setIfNotFound("RDS", "[{Artist} - {Title}]", true);
