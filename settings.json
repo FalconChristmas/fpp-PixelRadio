@@ -6,7 +6,8 @@
                 "IPAddress",
                 "Port",
                 "Frequency",
-                "IdleAction"
+                "IdleAction",
+                "PauseablePlaylist"
             ]   
         },
         "PixelRadioRDSSettings": {
@@ -60,6 +61,17 @@
                 "Mute": 1,
                 "Disable Carrier": 2
             }
+        },
+        "PauseablePlaylist": {
+            "name": "PauseablePlaylist",
+            "description": "Pauseable Playlist",
+            "tip": "Ignore the set Playlist Idle Behavior on the given playlist name",
+            "restart": 1,
+            "reboot": 0,
+            "type": "text",
+            "default": "",
+            "size": 30,
+            "maxlength": 150
         },
         "Frequency": {
             "name": "Frequency",
