@@ -304,6 +304,13 @@ public:
         int track = mediaDetails.track;
         int length = mediaDetails.length;
         
+        if( playlist["name"].asString().compare(currentPlaylist) != 0 ) {
+            LogDebug(VB_PLUGIN, "Setting currentplaylist to %s because it's currently %s\n", playlist["name"].asString().c_str(), currentPlaylist.c_str());
+            currentPlaylist = playlist["name"].asString();
+            
+        }
+
+
         std::string type = playlist["currentEntry"]["type"].asString();
         if (type != "both" && type != "media") {
             title = "";
