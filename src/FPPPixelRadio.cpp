@@ -125,7 +125,7 @@ public:
         while (running) {
             uint64_t ct = GetTimeMS();
             if (ct > nextStationTime && curStationIdString < stationIdStrings.size()) {
-                urls.emplace("psn=" + stationIdStrings[curStationIdString]);
+                urls.emplace("psn=" + urlencode(stationIdStrings[curStationIdString]));
                 curStationIdString++;
                 if (curStationIdString >= stationIdStrings.size()) {
                     curStationIdString = 0;
@@ -152,7 +152,7 @@ public:
                 std::string resp;
                 std::string u = urls.front();
                 urls.pop();
-                lk.unlock();
+                lk.unlock();            
                 urlGet(baseURL + u, resp);
                 LogDebug(VB_PLUGIN, "%s%s:   %s", baseURL.c_str(), u.c_str(), resp.c_str());
                 lk.lock();
@@ -196,6 +196,31 @@ public:
         }
     }
 
+    std::string urlencode(const std::string &s)
+    {
+        static const char lookup[]= "0123456789abcdef";
+        std::stringstream e;
+        for(int i=0, ix=s.length(); i<ix; i++)
+        {
+            const char& c = s[i];
+            if ( (48 <= c && c <= 57) ||//0-9
+                 (65 <= c && c <= 90) ||//abc...xyz
+                 (97 <= c && c <= 122) || //ABC...XYZ
+                 (c=='-' || c=='_' || c=='.' || c=='~') 
+            )
+            {
+                e << c;
+            }
+            else
+            {
+                e << '%';
+                e << lookup[ (c&0xF0)>>4 ];
+                e << lookup[ (c&0x0F) ];
+            }
+        }
+        return e.str();
+    }
+
     void formatAndSendText(const std::string &text, const std::string &artist, const std::string &title, const std::string &album, int length, int location) {
         std::string output;
         
@@ -236,6 +261,7 @@ public:
                 output += text[x];
             }
         }
+        output = urlencode(output);
         if (location == 0) {
             LogDebug(VB_PLUGIN, "Setting RDS Station text to \"%s\"\n", output.c_str());
             std::vector<std::string> fragments;
