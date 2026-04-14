@@ -1,12 +1,12 @@
 {
-	"repoName": "fpp-PixelRadio",
-	"name": "Pixel Radio",
-	"author": "Daniel Kulp",
-	"description": "RDS/Audio support for the Pixel Radio FM Transmitter",
-	"homeURL": "https://github.com/FalconChristmas/fpp-PixelRadio",
-	"srcURL": "https://github.com/FalconChristmas/fpp-PixelRadio.git",
-	"bugURL": "https://github.com/FalconChristmas/fpp-PixelRadio/issues",
-	"versions": [
+    "repoName": "fpp-PixelRadio",
+    "name": "Pixel Radio",
+    "author": "Daniel Kulp",
+    "description": "RDS/Audio support for the Pixel Radio FM Transmitter",
+    "homeURL": "https://github.com/FalconChristmas/fpp-PixelRadio",
+    "srcURL": "https://github.com/FalconChristmas/fpp-PixelRadio.git",
+    "bugURL": "https://github.com/FalconChristmas/fpp-PixelRadio/issues",
+    "versions": [
         {
             "minFPPVersion": "5.5",
             "maxFPPVersion": "7.99",
@@ -15,12 +15,18 @@
             "allowUpdates": 1
         },
         {
-            "minFPPVersion": "8.0",
+            "minFPPVersion": "8.99",
+            "maxFPPVersion": "0",
+            "branch": "master",
+            "sha": "b738b2caefe946e4dd381c45c89f94cc6ea54e99",
+            "allowUpdates": 1
+        },
+        {
+            "minFPPVersion": "10.0",
             "maxFPPVersion": "0",
             "branch": "master",
             "sha": "",
             "allowUpdates": 1
         }
-	]
+    ]
 }
-
