@@ -28,7 +28,7 @@ public:
 };
 
 
-class FPPPixelRadioPlugin : public FPPPlugin {
+class FPPPixelRadioPlugin : public FPPPlugins::Plugin, public FPPPlugins::PlaylistEventPlugin {
 public:
     std::string baseURL;
 
@@ -55,7 +55,7 @@ public:
     int curRDSString = 0;
     uint64_t nextRDSTime = 0;
 
-    FPPPixelRadioPlugin() : FPPPlugin("fpp-PixelRadio") {
+    FPPPixelRadioPlugin() : FPPPlugins::Plugin("fpp-PixelRadio"), FPPPlugins::PlaylistEventPlugin() {
         setDefaultSettings();
 
         stationIdCycleTime = std::stoi(settings["StationIDTime"]);
@@ -382,7 +382,7 @@ std::unique_ptr<Command::Result> PixelRadioCarrierCommand::run(const std::vector
 }
 
 extern "C" {
-    FPPPlugin *createPlugin() {
+    FPPPlugins::Plugin *createPlugin() {
         return new FPPPixelRadioPlugin();
     }
 }
