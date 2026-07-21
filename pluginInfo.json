@@ -6,6 +6,7 @@
     "homeURL": "https://github.com/FalconChristmas/fpp-PixelRadio",
     "srcURL": "https://github.com/FalconChristmas/fpp-PixelRadio.git",
     "bugURL": "https://github.com/FalconChristmas/fpp-PixelRadio/issues",
+    "iconURL": "https://raw.githubusercontent.com/FalconChristmas/fpp-PixelRadio/master/icon.png",
     "versions": [
         {
             "minFPPVersion": "5.5",
