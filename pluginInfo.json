@@ -12,7 +12,7 @@
             "minFPPVersion": "5.5",
             "maxFPPVersion": "7.99",
             "branch": "master",
-            "sha": "",
+            "sha": "39bbb537ba829c24a38b3d88e3b9a241cc666ada",
             "allowUpdates": 1
         },
         {
@@ -20,6 +20,13 @@
             "maxFPPVersion": "8.99",
             "branch": "master",
             "sha": "b738b2caefe946e4dd381c45c89f94cc6ea54e99",
+            "allowUpdates": 1
+        },
+        {
+            "minFPPVersion": "9.0",
+            "maxFPPVersion": "9.99",
+            "branch": "master",
+            "sha": "39bbb537ba829c24a38b3d88e3b9a241cc666ada",
             "allowUpdates": 1
         },
         {

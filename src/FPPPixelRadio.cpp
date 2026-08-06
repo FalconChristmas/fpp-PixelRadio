@@ -1,6 +1,7 @@
 #include <fpp-pch.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 #include <queue>
 
@@ -39,9 +40,15 @@ public:
     std::string rdsText3 = "";
 
     volatile bool running = true;
+    // Set by shutdown(): the sender finishes what is already queued and then
+    // exits, rather than picking up another cycle. 'finished' is what the
+    // readiness predicate handed back to FPP reports on. Both under 'lock'.
+    bool stopping = false;
+    bool finished = false;
     std::mutex lock;
     std::condition_variable condition;
     std::thread *sendThread = nullptr;
+    PixelRadioCarrierCommand *carrierCommand = nullptr;
     std::queue<std::string> urls;
 
     uint32_t stationIdCycleTime = 5;
@@ -99,32 +106,69 @@ public:
         sendThread = new std::thread([this] () {this->run();});
         condition.notify_all();
 
-        CommandManager::INSTANCE.addCommand(new PixelRadioCarrierCommand(this));
+        // PixelRadioCarrierCommand is declared in this plugin - its vtable lives
+        // in this .so and it holds a back-pointer here - so shutdown() takes it
+        // back rather than leaving it registered against an unloaded plugin.
+        carrierCommand = new PixelRadioCarrierCommand(this);
+        CommandManager::INSTANCE.addCommand(carrierCommand);
+    }
+
+    // Ask the sender to send its last "stop=rds", drain whatever else is queued
+    // and exit - but do NOT wait for it here. Each queued entry is an HTTP
+    // request to the radio, so if the radio is unreachable they sit in curl
+    // timeouts; the old destructor spun on the queue waiting for exactly that,
+    // which on an unload would stall fppd's main loop mid-show. FPP polls the
+    // predicate instead and destroys the plugin once the thread has finished.
+    virtual std::function<bool()> shutdown() override {
+        if (carrierCommand) {
+            // removeCommand() only unregisters; CommandManager deletes whatever
+            // is still registered at shutdown, so taking it back means owning it.
+            CommandManager::INSTANCE.removeCommand(carrierCommand);
+            delete carrierCommand;
+            carrierCommand = nullptr;
+        }
+        {
+            std::unique_lock<std::mutex> lk(lock);
+            if (!sendThread) {
+                return nullptr;
+            }
+            urls.emplace("stop=rds");
+            stopping = true;
+        }
+        condition.notify_all();
+        return [this]() {
+            std::unique_lock<std::mutex> lk(lock);
+            return finished;
+        };
     }
 
     virtual ~FPPPixelRadioPlugin() {
-        urls.emplace("stop=rds");
-        condition.notify_all();
-        std::unique_lock<std::mutex> lk(lock);
-        while (!urls.empty()) {
-            lk.unlock();
-            condition.notify_all();
-            lk.lock();
+        // By the time FPP destroys the plugin the predicate above has reported
+        // the sender finished, so this join returns at once. It stays
+        // unconditional so a teardown that never went through shutdown() still
+        // stops the thread rather than leaving it running against a destroyed
+        // object - the thread body touches members of this class.
+        {
+            std::unique_lock<std::mutex> lk(lock);
+            running = false;
+            stopping = true;
         }
-        running = false;
-        lk.unlock();
         condition.notify_all();
-        if (sendThread->joinable()) {
-            condition.notify_all();
-            sendThread->join();
+        if (sendThread) {
+            if (sendThread->joinable()) {
+                sendThread->join();
+            }
+            delete sendThread;
+            sendThread = nullptr;
         }
-        delete sendThread;
     }
     void run() {
         std::unique_lock<std::mutex> lk(lock);
         while (running) {
             uint64_t ct = GetTimeMS();
-            if (ct > nextStationTime && curStationIdString < stationIdStrings.size()) {
+            // Once shutting down, stop queueing new cycles - just flush what is
+            // already there (including shutdown()'s "stop=rds") and leave.
+            if (!stopping && ct > nextStationTime && curStationIdString < stationIdStrings.size()) {
                 urls.emplace("psn=" + urlencode(stationIdStrings[curStationIdString]));
                 curStationIdString++;
                 if (curStationIdString >= stationIdStrings.size()) {
@@ -132,7 +176,7 @@ public:
                 }
                 nextStationTime = ct + stationIdCycleTime * 1000;
             }
-            if (ct > nextRDSTime) {
+            if (!stopping && ct > nextRDSTime) {
                 std::string s = rdsStrings[curRDSString];
                 if (s == "") {
                     s = "%7f";
@@ -157,10 +201,18 @@ public:
                 LogDebug(VB_PLUGIN, "%s%s:   %s", baseURL.c_str(), u.c_str(), resp.c_str());
                 lk.lock();
             }
+            // Queue drained and we were asked to stop: nothing left to send.
+            if (stopping) {
+                break;
+            }
             if (running && urls.empty()) {
                 condition.wait_for(lk, std::chrono::seconds(1));
             }
         }
+        running = false;
+        finished = true; // still holding 'lock', which the predicate takes
+        lk.unlock();
+        condition.notify_all();
     }
     void startAction() {
         if (settings["IdleAction"] == "1") {
@@ -238,9 +290,15 @@ public:
             } else if (text[x] == ']') {
                 //nothing
             } else if (text[x] == '{') {
-                const static std::string ARTIST = "{Artist}";
-                const static std::string TITLE = "{Title}";
-                const static std::string ALBUM = "{Album}";
+                // constexpr string_view, not const static std::string: a
+                // static local in an inline (in-class) function is emitted
+                // as an STB_GNU_UNIQUE symbol, and glibc permanently refuses
+                // to unload any library that first defines one - dlclose()
+                // then succeeds and unmaps nothing. These need no dynamic
+                // initialisation, so they produce no guard variable at all.
+                constexpr std::string_view ARTIST = "{Artist}";
+                constexpr std::string_view TITLE = "{Title}";
+                constexpr std::string_view ALBUM = "{Album}";
                 std::string subs = text.substr(x);
                 if (subs.rfind(ARTIST) == 0) {
                     artistIdx = output.length();
@@ -380,6 +438,14 @@ std::unique_ptr<Command::Result> PixelRadioCarrierCommand::run(const std::vector
     }
     return std::make_unique<Command::Result>("OK");
 }
+
+// Safe to dlclose() on unload: the only thread is the URL sender, and FPP does
+// not destroy the plugin (nor unmap the library) until shutdown()'s predicate
+// reports it finished and the destructor has joined it. urlGet() is FPP's own
+// synchronous helper, not a CurlManager request, so there is nothing in flight
+// to cancel. No timers, no epoll descriptors, no HTTP routes; shutdown() also
+// withdraws and deletes the carrier command registered in the constructor.
+FPP_PLUGIN_SUPPORTS_UNLOAD()
 
 extern "C" {
     FPPPlugins::Plugin *createPlugin() {
