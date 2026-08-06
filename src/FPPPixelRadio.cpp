@@ -62,20 +62,73 @@ public:
     int curRDSString = 0;
     uint64_t nextRDSTime = 0;
 
-    FPPPixelRadioPlugin() : FPPPlugins::Plugin("fpp-PixelRadio"), FPPPlugins::PlaylistEventPlugin() {
+    // The "true" asks FPP to watch config/plugin.fpp-PixelRadio and call
+    // settingChanged() below, so retuning the radio no longer needs an fppd
+    // restart.
+    FPPPixelRadioPlugin() : FPPPlugins::Plugin("fpp-PixelRadio", true), FPPPlugins::PlaylistEventPlugin() {
         setDefaultSettings();
+        applyConfiguration();
+        sendThread = new std::thread([this] () {this->run();});
+        condition.notify_all();
 
-        stationIdCycleTime = std::stoi(settings["StationIDTime"]);
-        rdsCycleTime = std::stoi(settings["RDSCycleTime"]);
+        // PixelRadioCarrierCommand is declared in this plugin - its vtable lives
+        // in this .so and it holds a back-pointer here - so shutdown() takes it
+        // back rather than leaving it registered against an unloaded plugin.
+        carrierCommand = new PixelRadioCarrierCommand(this);
+        CommandManager::INSTANCE.addCommand(carrierCommand);
+    }
 
-        baseURL = "http://" + settings["IPAddress"] + ":" + settings["Port"] + "/cmd?";
+    // Push the current settings to the radio and refresh the text being cycled.
+    // Safe to call again while the sender thread is running - everything shared
+    // with it is written under 'lock', and the radio commands simply join the
+    // queue it is already draining - which is what lets a settings change take
+    // effect without restarting fppd.
+    void applyConfiguration() {
+        {
+            std::unique_lock<std::mutex> lk(lock);
+            baseURL = "http://" + settings["IPAddress"] + ":" + settings["Port"] + "/cmd?";
+            // Settings are user input, and this now runs whenever one changes
+            // rather than only at startup, so a throw here would land on the
+            // main loop inside FPP's file-monitor callback and take fppd down.
+            stationIdCycleTime = safeStoi(settings["StationIDTime"], 5, "StationIDTime");
+            rdsCycleTime = safeStoi(settings["RDSCycleTime"], 15, "RDSCycleTime");
 
-        std::string freq = settings["Frequency"];
-        replaceAll(freq, ".", "");
+            std::string freq = settings["Frequency"];
+            replaceAll(freq, ".", "");
+            urls.emplace("freq=" + freq);
+            urls.emplace(stationCodeCommand());
+            urls.emplace("start=rds");
+            urls.emplace("pty=" + settings["ProgramType"]);
 
-        std::unique_lock<std::mutex> lk(lock);
-        urls.emplace("freq=" + freq);
-        
+            // Restart the cycles from the top so the new text is what goes out
+            // next, rather than continuing part way through the old set.
+            curStationIdString = 0;
+            curRDSString = 0;
+            nextStationTime = 0;
+            nextRDSTime = 0;
+        }
+        stopAction();
+        formatAndSendText(settings["StationID"], "", "", "", 0, 0);
+        formatAndSendText(settings["RDS"], "", "", "", 0, 1);
+        formatAndSendText(settings["RDS2"], "", "", "", 0, 2);
+        formatAndSendText(settings["RDS3"], "", "", "", 0, 3);
+        condition.notify_all();
+    }
+
+    // Called by FPP when config/plugin.fpp-PixelRadio changes; the base class
+    // has already updated settings[key]. Every setting this plugin has feeds
+    // the radio configuration or the cycled text, and re-sending the lot is a
+    // handful of queued commands, so there is nothing to be gained by treating
+    // them individually. IdleAction is read at point of use in start/stopAction()
+    // and so needs nothing here at all.
+    virtual void settingChanged(const std::string &key, const std::string &value) override {
+        LogInfo(VB_PLUGIN, "PixelRadio: %s changed, reconfiguring\n", key.c_str());
+        applyConfiguration();
+    }
+
+    // "pic=0x...", the RDS programme identification code derived from the
+    // station's call sign. Caller holds 'lock'.
+    std::string stationCodeCommand() {
         std::string sc = settings["StationCode"];
         while (sc.length() < 4) {
             sc += "A";
@@ -92,25 +145,19 @@ public:
         v1 += v2 * 26 * 26;
         char buf[32];
         sprintf(buf, "pic=0x%X", v1);
-        urls.emplace(buf);
-        urls.emplace("start=rds");
-        urls.emplace("pty=" + settings["ProgramType"]);
+        return buf;
+    }
 
-        lk.unlock();
-        stopAction();
-
-        formatAndSendText(settings["StationID"], "", "", "", 0, 0);
-        formatAndSendText(settings["RDS"], "", "", "", 0, 1);
-        formatAndSendText(settings["RDS2"], "", "", "", 0, 2);
-        formatAndSendText(settings["RDS3"], "", "", "", 0, 3);
-        sendThread = new std::thread([this] () {this->run();});
-        condition.notify_all();
-
-        // PixelRadioCarrierCommand is declared in this plugin - its vtable lives
-        // in this .so and it holds a back-pointer here - so shutdown() takes it
-        // back rather than leaving it registered against an unloaded plugin.
-        carrierCommand = new PixelRadioCarrierCommand(this);
-        CommandManager::INSTANCE.addCommand(carrierCommand);
+    static uint32_t safeStoi(const std::string &s, uint32_t defVal, const char *name) {
+        try {
+            if (!s.empty()) {
+                return (uint32_t)std::stoi(s);
+            }
+        } catch (const std::exception &e) {
+            LogErr(VB_PLUGIN, "PixelRadio: bad value for %s (\"%s\"): %s - using %u\n",
+                   name, s.c_str(), e.what(), defVal);
+        }
+        return defVal;
     }
 
     // Ask the sender to send its last "stop=rds", drain whatever else is queued
@@ -196,8 +243,11 @@ public:
                 std::string resp;
                 std::string u = urls.front();
                 urls.pop();
-                lk.unlock();            
-                urlGet(baseURL + u, resp);
+                // Copy while holding the lock: applyConfiguration() can change
+                // baseURL from the main loop when the IP or port setting does.
+                std::string base = baseURL;
+                lk.unlock();
+                urlGet(base + u, resp);
                 LogDebug(VB_PLUGIN, "%s%s:   %s", baseURL.c_str(), u.c_str(), resp.c_str());
                 lk.lock();
             }
