@@ -144,7 +144,7 @@ public:
         v1 += v3 * 26;
         v1 += v2 * 26 * 26;
         char buf[32];
-        sprintf(buf, "pic=0x%X", v1);
+        snprintf(buf, sizeof(buf), "pic=0x%X", v1);
         return buf;
     }
 
