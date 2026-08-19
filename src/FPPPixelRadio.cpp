@@ -4,6 +4,10 @@
 #include <string_view>
 #include <vector>
 #include <queue>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 #include <unistd.h>
 #include <termios.h>
