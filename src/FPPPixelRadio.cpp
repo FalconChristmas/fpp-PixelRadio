@@ -36,6 +36,14 @@ public:
 class FPPPixelRadioPlugin : public FPPPlugins::Plugin, public FPPPlugins::PlaylistEventPlugin {
 public:
     std::string baseURL;
+    // False until an IPAddress is configured.  The plugin ships with it empty
+    // and every install that never sets one built "http://:8080/cmd?" and sent
+    // it anyway -- a PSN every StationIDTime and an RTM every RDSCycleTime,
+    // each failing instantly on a malformed URL and each writing a line to
+    // fppd.log.  It never reached the network, so it cost no time, but it
+    // buried real log entries and churned the SD card indefinitely.
+    bool configured = false;
+    bool warnedUnconfigured = false;
 
     
     std::string stationName = "";
@@ -91,6 +99,14 @@ public:
         {
             std::unique_lock<std::mutex> lk(lock);
             baseURL = "http://" + settings["IPAddress"] + ":" + settings["Port"] + "/cmd?";
+            // Re-evaluated on every settings change, so setting the IP starts
+            // the radio talking without an fppd restart, and clearing it stops
+            // the traffic again (and re-arms the warning).
+            const bool wasConfigured = configured;
+            configured = !settings["IPAddress"].empty();
+            if (configured != wasConfigured) {
+                warnedUnconfigured = false;
+            }
             // Settings are user input, and this now runs whenever one changes
             // rather than only at startup, so a throw here would land on the
             // main loop inside FPP's file-monitor callback and take fppd down.
@@ -250,9 +266,21 @@ public:
                 // Copy while holding the lock: applyConfiguration() can change
                 // baseURL from the main loop when the IP or port setting does.
                 std::string base = baseURL;
+                const bool send = configured;
+                const bool warn = !configured && !warnedUnconfigured;
+                if (warn) {
+                    warnedUnconfigured = true;
+                }
                 lk.unlock();
-                urlGet(base + u, resp);
-                LogDebug(VB_PLUGIN, "%s%s:   %s", baseURL.c_str(), u.c_str(), resp.c_str());
+                if (send) {
+                    urlGet(base + u, resp);
+                    LogDebug(VB_PLUGIN, "%s%s:   %s", base.c_str(), u.c_str(), resp.c_str());
+                } else if (warn) {
+                    // Once per transition, not once per URL: the point is to
+                    // stop filling the log, so the fix must not fill it either.
+                    LogWarn(VB_PLUGIN, "PixelRadio: no IPAddress configured; "
+                            "not sending RDS commands until one is set\n");
+                }
                 lk.lock();
             }
             // Queue drained and we were asked to stop: nothing left to send.
