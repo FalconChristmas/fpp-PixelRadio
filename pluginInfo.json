@@ -36,5 +36,28 @@
             "sha": "",
             "allowUpdates": 1
         }
-    ]
+    ],
+    "privacy": {
+        "summary": "Once you enter the Pixel Radio transmitter's address, sends the station name and the playing song's artist and title to it whenever FPP runs; it broadcasts them as RDS text to radios in range.",
+        "sends": [
+            {
+                "to": "http://the Pixel Radio transmitter address you enter",
+                "what": "frequency, station code and name, programme type, RDS text with the song's artist and title, carrier",
+                "why": "to set up the transmitter and keep its RDS display in step with what is playing",
+                "alwaysOn": false
+            },
+            {
+                "to": "anyone in FM range",
+                "what": "the station name and the current song's artist and title, as RDS text on the FM signal",
+                "why": "so car radios tuned to your show can show what is playing",
+                "alwaysOn": false
+            }
+        ],
+        "collects": [],
+        "sensors": [],
+        "remoteAccess": "none",
+        "systemChanges": [],
+        "closedCode": false,
+        "other": "Nothing is sent until a transmitter address is set; after that it sends to the radio every few seconds whenever FPP is running, even with no playlist playing. RDS text (song titles) is written to the FPP log only when debug logging is on. Settings are kept in FPP's config folder as plugin.fpp-PixelRadio. The 'PixelRadio Carrier' command lets anything that can send FPP commands turn the transmitter on or off."
+    }
 }
