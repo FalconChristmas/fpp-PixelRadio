@@ -41,6 +41,25 @@ Install from **Content Setup → Plugins** in the FPP web UI, then restart FPPD.
 - *RDS*, *RDS2*, *RDS3* — up to three RadioText messages.
 - *RDS Cycle Time* — how long each message is displayed.
 
+**Logging**
+
+FPP's own *Plugin* log level is shared by every plugin, so this plugin can also keep its own log,
+`logs/fpp-PixelRadio.log`, viewable and downloadable under **Content Setup → File Manager → Logs**.
+Changes take effect when saved; no FPPD restart is needed.
+
+- *Write PixelRadio Log File* — master switch for the file (off by default).
+- *Log Commands Sent to Radio* — *Off*; *Configuration Only* (frequency, station code, program type,
+  RDS start/stop, mute, carrier); or *Everything*, which adds the station ID and RDS text sent on
+  every cycle along with the radio's response.
+- *Log RDS Text Changes* — the station ID and RDS text each time it changes, e.g. on a new song.
+- *Log Radio Online/Offline* — one line when the radio stops responding and one when it is back.
+- *Log Setting Changes* — each setting saved on the page, with its new value.
+- *Max Log File Size (KB)* — at this size the log is moved to `fpp-PixelRadio.log.1` and a new one
+  started, so it never uses more than twice this.
+
+Whatever these are set to, `fppd.log` still gets the radio going offline (warning) and coming back
+(info), and anything it got before.
+
 ## Commands
 
 - **PixelRadio Carrier** — turn the transmitter's carrier on or off.
