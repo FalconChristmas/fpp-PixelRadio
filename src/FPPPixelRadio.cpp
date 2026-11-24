@@ -9,8 +9,15 @@
 #include <mutex>
 #include <thread>
 
+#include <cerrno>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+
 #include <unistd.h>
 #include <termios.h>
+#include <sys/stat.h>
 
 #include "mediadetails.h"
 #include "common.h"
@@ -74,11 +81,43 @@ public:
     int curRDSString = 0;
     uint64_t nextRDSTime = 0;
 
+    // ---- Plugin log file ----------------------------------------------------
+    // fppd.log only offers one level for every plugin at once, so this plugin
+    // can also keep its own log, logs/fpp-PixelRadio.log, with its own choice
+    // of what goes in it. Nothing here changes what goes to fppd.log.
+    //
+    // Written from both the main loop (settings, playlist and media callbacks)
+    // and the sender thread, so the file and the options that decide what is
+    // written are all guarded by logLock - never held while taking 'lock'.
+    enum LogCommandsLevel { LOG_CMDS_OFF = 0, LOG_CMDS_CONFIG = 1, LOG_CMDS_ALL = 2 };
+    std::mutex logLock;
+    FILE *logFile = nullptr;
+    std::string logFileName;
+    bool logToFile = false;
+    int logCommands = LOG_CMDS_CONFIG;
+    bool logRDSText = false;
+    bool logConnection = true;
+    bool logSettingChanges = true;
+    long logMaxSize = 1024 * 1024;
+    // Last text logged per slot (0 = station ID, 1-3 = RDS strings), so a new
+    // song logs only the text that actually changed. Guarded by logLock.
+    std::array<std::string, 4> lastLoggedText;
+
+    // Sender thread only: whether the last request to the radio succeeded
+    // (-1 = not tried yet) and which address that was, so a changed IP or
+    // port starts the online/offline tracking afresh.
+    int radioOnline = -1;
+    std::string radioBase;
+
     // The "true" asks FPP to watch config/plugin.fpp-PixelRadio and call
     // settingChanged() below, so retuning the radio no longer needs an fppd
     // restart.
     FPPPixelRadioPlugin() : FPPPlugins::Plugin("fpp-PixelRadio", true), FPPPlugins::PlaylistEventPlugin() {
         setDefaultSettings();
+        applyLogSettings();
+        writeLog("PixelRadio plugin started (radio %s:%s, %s MHz)",
+                 settings["IPAddress"].empty() ? "<not set>" : settings["IPAddress"].c_str(),
+                 settings["Port"].c_str(), settings["Frequency"].c_str());
         applyConfiguration();
         sendThread = new std::thread([this] () {this->run();});
         condition.notify_all();
@@ -142,8 +181,170 @@ public:
     // them individually. IdleAction is read at point of use in start/stopAction()
     // and so needs nothing here at all.
     virtual void settingChanged(const std::string &key, const std::string &value) override {
+        if (key.rfind("Log", 0) == 0) {
+            // Logging options affect only this plugin's log file; there is no
+            // reason to re-send the radio its whole configuration for them.
+            LogInfo(VB_PLUGIN, "PixelRadio: logging option %s changed\n", key.c_str());
+            applyLogSettings();
+            if (shouldLogSettingChanges()) {
+                writeLog("Logging option %s set to \"%s\"", key.c_str(), value.c_str());
+            }
+            return;
+        }
         LogInfo(VB_PLUGIN, "PixelRadio: %s changed, reconfiguring\n", key.c_str());
+        if (shouldLogSettingChanges()) {
+            writeLog("Setting %s changed to \"%s\"", key.c_str(), value.c_str());
+        }
         applyConfiguration();
+    }
+
+    // Re-read the logging options. Main loop only (it reads 'settings').
+    void applyLogSettings() {
+        std::unique_lock<std::mutex> lk(logLock);
+        logToFile = settings["LogToFile"] == "1";
+        logCommands = (int)safeStoi(settings["LogCommands"], LOG_CMDS_CONFIG, "LogCommands");
+        logRDSText = settings["LogRDSText"] == "1";
+        logConnection = settings["LogConnection"] == "1";
+        logSettingChanges = settings["LogSettingChanges"] == "1";
+        uint32_t kb = safeStoi(settings["LogMaxSizeKB"], 1024, "LogMaxSizeKB");
+        if (kb < 64) {
+            kb = 64;
+        }
+        logMaxSize = (long)kb * 1024;
+        if (!logToFile && logFile) {
+            fclose(logFile);
+            logFile = nullptr;
+        }
+    }
+
+    bool shouldLogSettingChanges() {
+        std::unique_lock<std::mutex> lk(logLock);
+        return logToFile && logSettingChanges;
+    }
+
+    // Commands sent on every cycle (station ID fragments and RDS text), as
+    // opposed to the occasional configuration commands.
+    static bool isCycleCommand(const std::string &u) {
+        return u.rfind("psn=", 0) == 0 || u.rfind("rtm=", 0) == 0 || u.rfind("rtper=", 0) == 0;
+    }
+
+    // Caller holds logLock. Opens the log on first use and rotates it to .1
+    // once it reaches the size limit.
+    bool openLogFileLocked() {
+        if (logFile) {
+            long sz = ftell(logFile);
+            if (sz >= 0 && sz < logMaxSize) {
+                return true;
+            }
+            fclose(logFile);
+            logFile = nullptr;
+            std::string old = logFileName + ".1";
+            unlink(old.c_str());
+            rename(logFileName.c_str(), old.c_str());
+        }
+        if (logFileName.empty()) {
+            logFileName = FPP_DIR_MEDIA("/logs/fpp-PixelRadio.log");
+        }
+        logFile = fopen(logFileName.c_str(), "a");
+        if (logFile) {
+            // So ftell() above measures the existing file, not just this run.
+            fseek(logFile, 0, SEEK_END);
+        }
+        if (!logFile) {
+            LogErr(VB_PLUGIN, "PixelRadio: unable to open %s: %s - log file disabled until the option is saved again\n",
+                   logFileName.c_str(), strerror(errno));
+            logToFile = false;
+            return false;
+        }
+        return true;
+    }
+
+    // Write one line to the plugin log, if it is enabled. Callers check the
+    // per-category option themselves; this only checks the master switch.
+    __attribute__((format(printf, 2, 3)))
+    void writeLog(const char *format, ...) {
+        std::unique_lock<std::mutex> lk(logLock);
+        if (!logToFile || !openLogFileLocked()) {
+            return;
+        }
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        struct tm tm;
+        localtime_r(&ts.tv_sec, &tm);
+        char tbuf[32];
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tm);
+        fprintf(logFile, "%s.%03ld ", tbuf, ts.tv_nsec / 1000000);
+
+        va_list args;
+        va_start(args, format);
+        vfprintf(logFile, format, args);
+        va_end(args);
+        fputc('\n', logFile);
+        fflush(logFile);
+    }
+
+    // Sender thread: log a command and its result according to the options,
+    // and track whether the radio is answering.
+    void logCommandResult(const std::string &base, const std::string &u, bool ok, const std::string &resp) {
+        bool logCmd;
+        bool logConn;
+        {
+            std::unique_lock<std::mutex> lk(logLock);
+            logCmd = logToFile && (logCommands == LOG_CMDS_ALL ||
+                                   (logCommands == LOG_CMDS_CONFIG && !isCycleCommand(u)));
+            logConn = logToFile && logConnection;
+        }
+        if (logCmd) {
+            if (ok) {
+                writeLog("Sent %s -> %s", u.c_str(), resp.empty() ? "(empty response)" : resp.c_str());
+            } else {
+                writeLog("FAILED %s (no response from %s)", u.c_str(), base.c_str());
+            }
+        }
+
+        if (base != radioBase) {
+            radioBase = base;
+            radioOnline = -1;
+        }
+        const int now = ok ? 1 : 0;
+        if (now == radioOnline) {
+            return;
+        }
+        const int was = radioOnline;
+        radioOnline = now;
+        if (!ok) {
+            // fppd.log gets this too, whatever the file options: an offline
+            // radio is otherwise only visible as FPP's generic curl errors.
+            LogWarn(VB_PLUGIN, "PixelRadio: radio at %s is not responding\n", base.c_str());
+            if (logConn) {
+                writeLog("Radio at %s is NOT responding", base.c_str());
+            }
+        } else if (was == 0) {
+            LogInfo(VB_PLUGIN, "PixelRadio: radio at %s is responding again\n", base.c_str());
+            if (logConn) {
+                writeLog("Radio at %s is responding again", base.c_str());
+            }
+        } else if (logConn) {
+            writeLog("Radio at %s is responding", base.c_str());
+        }
+    }
+
+    // Main loop: log RDS / station ID text when it differs from what was last
+    // logged for that slot. 'text' is the plain (not URL-encoded) text.
+    void logTextChange(int location, const std::string &text) {
+        {
+            std::unique_lock<std::mutex> lk(logLock);
+            if (!logToFile || !logRDSText || lastLoggedText[location] == text) {
+                return;
+            }
+            lastLoggedText[location] = text;
+        }
+        std::string shown = text.empty() ? "(empty)" : "\"" + text + "\"";
+        if (location == 0) {
+            writeLog("Station ID text: %s", shown.c_str());
+        } else {
+            writeLog("RDS text #%d: %s", location, shown.c_str());
+        }
     }
 
     // "pic=0x...", the RDS programme identification code derived from the
@@ -228,6 +429,11 @@ public:
             delete sendThread;
             sendThread = nullptr;
         }
+        std::unique_lock<std::mutex> lk(logLock);
+        if (logFile) {
+            fclose(logFile);
+            logFile = nullptr;
+        }
     }
     void run() {
         std::unique_lock<std::mutex> lk(lock);
@@ -273,13 +479,15 @@ public:
                 }
                 lk.unlock();
                 if (send) {
-                    urlGet(base + u, resp);
+                    const bool ok = urlGet(base + u, resp);
                     LogDebug(VB_PLUGIN, "%s%s:   %s", base.c_str(), u.c_str(), resp.c_str());
+                    logCommandResult(base, u, ok, resp);
                 } else if (warn) {
                     // Once per transition, not once per URL: the point is to
                     // stop filling the log, so the fix must not fill it either.
                     LogWarn(VB_PLUGIN, "PixelRadio: no IPAddress configured; "
                             "not sending RDS commands until one is set\n");
+                    writeLog("No IP Address configured - not sending commands to the radio until one is set");
                 }
                 lk.lock();
             }
@@ -401,6 +609,7 @@ public:
                 output += text[x];
             }
         }
+        logTextChange(location, output);
         output = urlencode(output);
         if (location == 0) {
             LogDebug(VB_PLUGIN, "Setting RDS Station text to \"%s\"\n", output.c_str());
@@ -489,6 +698,13 @@ public:
         setIfNotFound("StationIDTime", "5");
         setIfNotFound("ProgramType", "0");
         setIfNotFound("StationCode", "WFPP");
+
+        setIfNotFound("LogToFile", "0");
+        setIfNotFound("LogCommands", "1");
+        setIfNotFound("LogRDSText", "0");
+        setIfNotFound("LogConnection", "1");
+        setIfNotFound("LogSettingChanges", "1");
+        setIfNotFound("LogMaxSizeKB", "1024");
     }
     void setIfNotFound(const std::string &s, const std::string &v, bool emptyAllowed = false) {
         if (settings.find(s) == settings.end()) {

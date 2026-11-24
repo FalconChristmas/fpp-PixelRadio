@@ -21,6 +21,17 @@
                 "RDS3",
                 "RDSCycleTime"
             ]   
+        },
+        "PixelRadioLogging": {
+            "description": "Logging",
+            "settings": [
+                "LogToFile",
+                "LogCommands",
+                "LogRDSText",
+                "LogConnection",
+                "LogSettingChanges",
+                "LogMaxSizeKB"
+            ]
         }
     },
     "settings": {
@@ -137,6 +148,75 @@
             "default": 15,
             "min": 1,
             "max": 300
+        },
+        "LogToFile": {
+            "name": "LogToFile",
+            "description": "Write PixelRadio Log File",
+            "tip": "Write this plugin's activity to logs/fpp-PixelRadio.log (viewable under Content Setup - File Manager - Logs), independent of FPP's Plugin log level. The options below choose what goes in it.",
+            "restart": 0,
+            "reboot": 0,
+            "type": "checkbox",
+            "checkedValue": "1",
+            "uncheckedValue": "0",
+            "default": "0"
+        },
+        "LogCommands": {
+            "name": "LogCommands",
+            "description": "Log Commands Sent to Radio",
+            "tip": "Configuration only: frequency, station code, program type, RDS start/stop, mute and carrier. Everything: also the station ID and RDS text sent on every cycle, with the radio's response - this is a line every few seconds.",
+            "restart": 0,
+            "reboot": 0,
+            "type": "select",
+            "default": "1",
+            "options": {
+                "Off": "0",
+                "Configuration Only": "1",
+                "Everything": "2"
+            }
+        },
+        "LogRDSText": {
+            "name": "LogRDSText",
+            "description": "Log RDS Text Changes",
+            "tip": "Log the station ID and RDS text whenever it changes, such as on each new song.",
+            "restart": 0,
+            "reboot": 0,
+            "type": "checkbox",
+            "checkedValue": "1",
+            "uncheckedValue": "0",
+            "default": "0"
+        },
+        "LogConnection": {
+            "name": "LogConnection",
+            "description": "Log Radio Online/Offline",
+            "tip": "Log once when the radio stops responding and once when it responds again.",
+            "restart": 0,
+            "reboot": 0,
+            "type": "checkbox",
+            "checkedValue": "1",
+            "uncheckedValue": "0",
+            "default": "1"
+        },
+        "LogSettingChanges": {
+            "name": "LogSettingChanges",
+            "description": "Log Setting Changes",
+            "tip": "Log each Pixel Radio setting saved on this page, with its new value.",
+            "restart": 0,
+            "reboot": 0,
+            "type": "checkbox",
+            "checkedValue": "1",
+            "uncheckedValue": "0",
+            "default": "1"
+        },
+        "LogMaxSizeKB": {
+            "name": "LogMaxSizeKB",
+            "description": "Max Log File Size (KB)",
+            "tip": "When the log reaches this size it is renamed to fpp-PixelRadio.log.1 (replacing any older one) and a new log is started, so it never uses more than twice this on the SD card.",
+            "restart": 0,
+            "reboot": 0,
+            "type": "number",
+            "default": 1024,
+            "min": 64,
+            "max": 10240
         },
         "StationCode": {
             "name": "StationCode",
